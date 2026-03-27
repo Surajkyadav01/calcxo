@@ -284,13 +284,8 @@ const Calculator: React.FC = () => {
             {fullExpression}
           </div>
         )}
-        {previousExpression && !fullExpression && justEvaluated && (
-          <div className="text-right text-muted-foreground text-sm truncate">
-            {previousExpression}
-          </div>
-        )}
         <div className="text-right text-foreground text-5xl font-light tracking-tight truncate leading-tight pb-2">
-          {formatDisplay(display)}
+          {formatDisplay(currentInput)}
         </div>
       </div>
 
