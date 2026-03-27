@@ -288,8 +288,9 @@ const Calculator: React.FC = () => {
           history={history}
           onClose={() => setShowHistory(false)}
           onSelect={(entry) => {
-            setDisplay(entry.result);
-            setExpression('');
+            setCurrentInput(entry.result);
+            setFullExpression('');
+            setJustEvaluated(true);
             setShowHistory(false);
           }}
         />
