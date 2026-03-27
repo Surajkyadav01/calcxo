@@ -12,8 +12,9 @@ interface HistoryEntry {
 }
 
 const Calculator: React.FC = () => {
-  const [display, setDisplay] = useState('0');
-  const [expression, setExpression] = useState('');
+  const [currentInput, setCurrentInput] = useState('0');
+  const [previousExpression, setPreviousExpression] = useState('');
+  const [fullExpression, setFullExpression] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [showScientific, setShowScientific] = useState(false);
@@ -21,7 +22,7 @@ const Calculator: React.FC = () => {
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showTheme, setShowTheme] = useState(false);
   const [isDark, setIsDark] = useState(false);
-  const [lastResult, setLastResult] = useState('');
+  const [justEvaluated, setJustEvaluated] = useState(false);
 
   useEffect(() => {
     if (isDark) {
@@ -31,23 +32,46 @@ const Calculator: React.FC = () => {
     }
   }, [isDark]);
 
+  // Display value (what user sees) and expression value (for eval)
+  const display = currentInput;
+  const expression = fullExpression;
+
   const handleNumber = useCallback((num: string) => {
-    if (display === '0' && num !== '.') {
-      setDisplay(num);
-    } else if (num === '.' && display.includes('.')) {
+    if (justEvaluated) {
+      // After pressing =, start fresh with new number
+      setCurrentInput(num === '.' ? '0.' : num);
+      setFullExpression('');
+      setPreviousExpression('');
+      setJustEvaluated(false);
       return;
-    } else {
-      setDisplay(prev => prev + num);
     }
-  }, [display]);
+    
+    if (currentInput === '0' && num !== '.') {
+      setCurrentInput(num);
+    } else if (num === '.' && currentInput.includes('.')) {
+      return;
+    } else if (currentInput === '0' && num === '.') {
+      setCurrentInput('0.');
+    } else {
+      setCurrentInput(prev => prev + num);
+    }
+  }, [currentInput, justEvaluated]);
 
   const handleOperator = useCallback((op: string) => {
-    setExpression(prev => {
-      const expr = prev + display + ' ' + op + ' ';
-      return expr;
-    });
-    setDisplay('0');
-  }, [display]);
+    const opSymbol = op === '*' ? '×' : op === '/' ? '÷' : op === '-' ? '−' : op;
+    
+    if (justEvaluated) {
+      // Chain from result
+      setFullExpression(currentInput + ' ' + opSymbol + ' ');
+      setCurrentInput('0');
+      setJustEvaluated(false);
+      return;
+    }
+    
+    // Build expression
+    setFullExpression(prev => prev + currentInput + ' ' + opSymbol + ' ');
+    setCurrentInput('0');
+  }, [currentInput, justEvaluated]);
 
   const factorial = (n: number): number => {
     if (n < 0) return NaN;
@@ -57,18 +81,25 @@ const Calculator: React.FC = () => {
     return result;
   };
 
-  const evaluateExpression = useCallback((expr: string): string => {
+  const safeEvaluate = useCallback((expr: string): string => {
     try {
       // Replace display symbols with JS operators
       let evalExpr = expr
         .replace(/×/g, '*')
         .replace(/÷/g, '/')
-        .replace(/−/g, '-');
+        .replace(/−/g, '-')
+        .replace(/\^/g, '**');
       
-      // Evaluate using Function constructor (safe for calculator)
-      const result = new Function('return ' + evalExpr)();
+      // Remove trailing operator and spaces
+      evalExpr = evalExpr.replace(/[\s+\-*/]+$/, '').trim();
+      
+      if (!evalExpr) return '0';
+      
+      const result = new Function('return (' + evalExpr + ')')();
       if (typeof result === 'number' && isFinite(result)) {
-        return result % 1 !== 0 ? parseFloat(result.toFixed(10)).toString() : result.toString();
+        // Format: remove trailing zeros after decimal
+        const str = parseFloat(result.toFixed(10)).toString();
+        return str;
       }
       return 'Error';
     } catch {
@@ -77,47 +108,73 @@ const Calculator: React.FC = () => {
   }, []);
 
   const handleEquals = useCallback(() => {
-    const fullExpr = expression + display;
-    const result = evaluateExpression(fullExpr);
+    const fullExpr = fullExpression + currentInput;
+    if (!fullExpr.trim() || fullExpr.trim() === currentInput) {
+      // No operation to perform if just a number
+      if (!fullExpression) return;
+    }
     
-    const displayExpr = fullExpr.replace(/\*/g, '×').replace(/\//g, '÷').replace(/-/g, '−');
+    const result = safeEvaluate(fullExpr);
     
-    setHistory(prev => [{ expression: displayExpr, result }, ...prev]);
-    setLastResult(result);
-    setDisplay(result);
-    setExpression('');
-  }, [expression, display, evaluateExpression]);
+    setHistory(prev => [{ expression: fullExpr, result }, ...prev]);
+    setPreviousExpression(fullExpr);
+    setCurrentInput(result);
+    setFullExpression('');
+    setJustEvaluated(true);
+  }, [fullExpression, currentInput, safeEvaluate]);
 
   const handleClear = useCallback(() => {
-    setDisplay('0');
-    setExpression('');
+    setCurrentInput('0');
+    setFullExpression('');
+    setPreviousExpression('');
+    setJustEvaluated(false);
   }, []);
 
   const handleBackspace = useCallback(() => {
-    setDisplay(prev => prev.length > 1 ? prev.slice(0, -1) : '0');
-  }, []);
+    if (justEvaluated) {
+      // After evaluation, backspace clears all
+      handleClear();
+      return;
+    }
+    if (currentInput.length > 1) {
+      setCurrentInput(prev => prev.slice(0, -1));
+    } else {
+      setCurrentInput('0');
+    }
+  }, [currentInput, justEvaluated, handleClear]);
 
   const handlePercent = useCallback(() => {
-    const num = parseFloat(display);
-    setDisplay((num / 100).toString());
-  }, [display]);
+    const num = parseFloat(currentInput);
+    if (!isNaN(num)) {
+      setCurrentInput((num / 100).toString());
+      setJustEvaluated(false);
+    }
+  }, [currentInput]);
 
   const handleParenthesis = useCallback(() => {
-    const openCount = (expression + display).split('(').length - 1;
-    const closeCount = (expression + display).split(')').length - 1;
-    
-    if (display === '0' || /[+\-×÷(]$/.test(expression.trim())) {
-      setExpression(prev => prev + '(');
-    } else if (openCount > closeCount) {
-      setDisplay(prev => prev + ')');
-    } else {
-      setExpression(prev => prev + display + '×(');
-      setDisplay('0');
+    if (justEvaluated) {
+      setFullExpression('(');
+      setCurrentInput('0');
+      setJustEvaluated(false);
+      return;
     }
-  }, [display, expression]);
+    
+    const combined = fullExpression + currentInput;
+    const openCount = (combined.match(/\(/g) || []).length;
+    const closeCount = (combined.match(/\)/g) || []).length;
+    
+    if (currentInput === '0') {
+      setFullExpression(prev => prev + '(');
+    } else if (openCount > closeCount) {
+      setCurrentInput(prev => prev + ')');
+    } else {
+      setFullExpression(prev => prev + currentInput + '×(');
+      setCurrentInput('0');
+    }
+  }, [currentInput, fullExpression, justEvaluated]);
 
   const handleScientific = useCallback((func: string) => {
-    const num = parseFloat(display);
+    const num = parseFloat(currentInput);
     let result: number;
     
     switch (func) {
@@ -138,28 +195,34 @@ const Calculator: React.FC = () => {
       default: return;
     }
     
-    setDisplay(isFinite(result) ? parseFloat(result.toFixed(10)).toString() : 'Error');
-  }, [display, handleOperator]);
+    const res = isFinite(result) ? parseFloat(result.toFixed(10)).toString() : 'Error';
+    setCurrentInput(res);
+    setJustEvaluated(false);
+  }, [currentInput, handleOperator]);
 
   const handleGST = useCallback((rate: number) => {
-    const num = parseFloat(display);
+    const num = parseFloat(currentInput);
+    if (isNaN(num)) return;
     const gst = num * rate / 100;
     const total = num + gst;
     const expr = `${num} + ${rate}% GST`;
     setHistory(prev => [{ expression: expr, result: total.toFixed(2) }, ...prev]);
-    setDisplay(total.toFixed(2));
-    setExpression('');
-  }, [display]);
+    setCurrentInput(total.toFixed(2));
+    setFullExpression('');
+    setJustEvaluated(true);
+  }, [currentInput]);
 
   const handleDiscount = useCallback((rate: number) => {
-    const num = parseFloat(display);
+    const num = parseFloat(currentInput);
+    if (isNaN(num)) return;
     const discount = num * rate / 100;
     const total = num - discount;
     const expr = `${num} - ${rate}% Discount`;
     setHistory(prev => [{ expression: expr, result: total.toFixed(2) }, ...prev]);
-    setDisplay(total.toFixed(2));
-    setExpression('');
-  }, [display]);
+    setCurrentInput(total.toFixed(2));
+    setFullExpression('');
+    setJustEvaluated(true);
+  }, [currentInput]);
 
   const clearHistory = useCallback(() => {
     setHistory([]);
@@ -168,11 +231,19 @@ const Calculator: React.FC = () => {
 
   const formatDisplay = (val: string) => {
     if (val === 'Error') return val;
+    if (val === '0') return '0';
+    // Don't format if user is still typing decimals
+    if (val.endsWith('.')) return val;
     const num = parseFloat(val);
     if (isNaN(num)) return val;
-    if (val.includes('.') && val.endsWith('0')) return val;
-    if (val.endsWith('.')) return val;
-    return num.toLocaleString('en-IN');
+    // Format with Indian number system
+    const parts = val.split('.');
+    const intPart = parseInt(parts[0], 10);
+    const formatted = intPart.toLocaleString('en-IN');
+    if (parts.length > 1) {
+      return formatted + '.' + parts[1];
+    }
+    return formatted;
   };
 
   return (
