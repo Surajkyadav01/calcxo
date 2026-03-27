@@ -298,14 +298,14 @@ const Calculator: React.FC = () => {
 
       {/* Display */}
       <div className="flex-1 flex flex-col justify-end px-6 pb-2">
-        {expression && (
+        {fullExpression && (
           <div className="text-right text-muted-foreground text-lg truncate">
-            {expression}
+            {fullExpression}
           </div>
         )}
-        {lastResult && !expression && display !== '0' && (
-          <div className="text-right text-muted-foreground text-lg">
-            {/* show previous expression */}
+        {previousExpression && !fullExpression && justEvaluated && (
+          <div className="text-right text-muted-foreground text-sm truncate">
+            {previousExpression}
           </div>
         )}
         <div className="text-right text-foreground text-5xl font-light tracking-tight truncate leading-tight pb-2">
