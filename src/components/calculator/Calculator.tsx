@@ -6,13 +6,14 @@ import ThreeDotsMenu from '@/components/calculator/ThreeDotsMenu';
 import PrivacyPolicyDialog from '@/components/calculator/PrivacyPolicyDialog';
 import ThemeDialog from '@/components/calculator/ThemeDialog';
 
-interface HistoryEntry {
+export interface HistoryEntry {
   expression: string;
   result: string;
+  timestamp: number;
 }
 
 const Calculator: React.FC = () => {
-  const [currentInput, setCurrentInput] = useState('0');
+  const [currentInput, setCurrentInput] = useState('');
   const [fullExpression, setFullExpression] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -38,7 +39,6 @@ const Calculator: React.FC = () => {
     }
 
     if (waitingForOperand) {
-      // User started typing after pressing an operator
       setCurrentInput(num === '.' ? '0.' : num);
       setWaitingForOperand(false);
       return;
@@ -64,12 +64,12 @@ const Calculator: React.FC = () => {
     }
 
     if (waitingForOperand) {
-      // Replace last operator
       setFullExpression(prev => prev.replace(/[+−×÷^]\s*$/, '').trim() + ' ' + opSymbol + ' ');
       return;
     }
 
-    setFullExpression(prev => prev + currentInput + ' ' + opSymbol + ' ');
+    const inputVal = currentInput || '0';
+    setFullExpression(prev => prev + inputVal + ' ' + opSymbol + ' ');
     setWaitingForOperand(true);
   }, [currentInput, justEvaluated, waitingForOperand]);
 
@@ -101,11 +101,12 @@ const Calculator: React.FC = () => {
   }, []);
 
   const handleEquals = useCallback(() => {
-    const fullExpr = fullExpression + currentInput;
-    if (!fullExpression.trim()) return; // No operator pressed yet, nothing to calculate
+    const inputVal = currentInput || '0';
+    const fullExpr = fullExpression + inputVal;
+    if (!fullExpression.trim()) return;
 
     const result = safeEvaluate(fullExpr);
-    setHistory(prev => [{ expression: fullExpr, result }, ...prev]);
+    setHistory(prev => [{ expression: fullExpr, result, timestamp: Date.now() }, ...prev]);
     setCurrentInput(result);
     setFullExpression('');
     setJustEvaluated(true);
@@ -113,7 +114,7 @@ const Calculator: React.FC = () => {
   }, [fullExpression, currentInput, safeEvaluate]);
 
   const handleClear = useCallback(() => {
-    setCurrentInput('0');
+    setCurrentInput('');
     setFullExpression('');
     setJustEvaluated(false);
     setWaitingForOperand(false);
@@ -121,27 +122,70 @@ const Calculator: React.FC = () => {
 
   const handleBackspace = useCallback(() => {
     if (justEvaluated) {
-      // After result, allow deleting digits from result
+      // Delete from result
       if (currentInput.length > 1) {
         setCurrentInput(prev => prev.slice(0, -1));
       } else {
-        setCurrentInput('0');
+        setCurrentInput('');
       }
       setJustEvaluated(false);
       return;
     }
+
     if (waitingForOperand) {
+      // Remove last operator from fullExpression
+      const trimmed = fullExpression.trimEnd();
+      if (trimmed.length > 0) {
+        // Remove the last operator and space
+        const newExpr = trimmed.replace(/\s*[+−×÷^]\s*$/, '');
+        if (newExpr === '') {
+          // Nothing left in expression, restore the number
+          setFullExpression('');
+          setWaitingForOperand(false);
+          // The number before operator is in the expression, extract it
+          const parts = trimmed.split(/\s+/);
+          if (parts.length >= 1) {
+            setCurrentInput(parts[parts.length - 2] || parts[0] || '');
+          }
+        } else {
+          // There's still expression left, extract last number
+          const parts = newExpr.split(/\s+/);
+          const lastNum = parts.pop() || '';
+          const remainingExpr = parts.join(' ');
+          setFullExpression(remainingExpr ? remainingExpr + ' ' : '');
+          setCurrentInput(lastNum);
+          setWaitingForOperand(false);
+        }
+      }
       return;
     }
+
+    // Normal: delete from currentInput
     if (currentInput.length > 1) {
       setCurrentInput(prev => prev.slice(0, -1));
-    } else if (currentInput !== '0') {
-      setCurrentInput('0');
+    } else if (currentInput.length === 1) {
+      setCurrentInput('');
+      // If there's expression, try to go back
+      if (fullExpression.trim()) {
+        const trimmed = fullExpression.trimEnd();
+        const parts = trimmed.split(/\s+/);
+        if (parts.length >= 2) {
+          // Remove last operator and get the number before it
+          parts.pop(); // remove operator
+          const lastNum = parts.pop() || '';
+          setFullExpression(parts.length > 0 ? parts.join(' ') + ' ' : '');
+          setCurrentInput(lastNum);
+          setWaitingForOperand(false);
+        } else if (parts.length === 1) {
+          setCurrentInput(parts[0]);
+          setFullExpression('');
+        }
+      }
     }
-  }, [currentInput, justEvaluated, waitingForOperand]);
+  }, [currentInput, fullExpression, justEvaluated, waitingForOperand]);
 
   const handlePercent = useCallback(() => {
-    const num = parseFloat(currentInput);
+    const num = parseFloat(currentInput || '0');
     if (!isNaN(num)) {
       setCurrentInput((num / 100).toString());
       setJustEvaluated(false);
@@ -151,7 +195,7 @@ const Calculator: React.FC = () => {
   const handleParenthesis = useCallback(() => {
     if (justEvaluated) {
       setFullExpression('(');
-      setCurrentInput('0');
+      setCurrentInput('');
       setJustEvaluated(false);
       setWaitingForOperand(true);
       return;
@@ -161,19 +205,19 @@ const Calculator: React.FC = () => {
     const openCount = (combined.match(/\(/g) || []).length;
     const closeCount = (combined.match(/\)/g) || []).length;
 
-    if (waitingForOperand || currentInput === '0') {
+    if (waitingForOperand || !currentInput) {
       setFullExpression(prev => prev + '(');
     } else if (openCount > closeCount) {
       setCurrentInput(prev => prev + ')');
     } else {
       setFullExpression(prev => prev + currentInput + ' × (');
-      setCurrentInput('0');
+      setCurrentInput('');
       setWaitingForOperand(true);
     }
   }, [currentInput, fullExpression, justEvaluated, waitingForOperand]);
 
   const handleScientific = useCallback((func: string) => {
-    const num = parseFloat(currentInput);
+    const num = parseFloat(currentInput || '0');
     let result: number;
     switch (func) {
       case 'sin': result = Math.sin(num * Math.PI / 180); break;
@@ -198,11 +242,11 @@ const Calculator: React.FC = () => {
   }, [currentInput, handleOperator]);
 
   const handleGST = useCallback((rate: number) => {
-    const num = parseFloat(currentInput);
+    const num = parseFloat(currentInput || '0');
     if (isNaN(num)) return;
     const total = num + (num * rate / 100);
     const expr = `${num} + ${rate}% GST`;
-    setHistory(prev => [{ expression: expr, result: total.toFixed(2) }, ...prev]);
+    setHistory(prev => [{ expression: expr, result: total.toFixed(2), timestamp: Date.now() }, ...prev]);
     setCurrentInput(total.toFixed(2));
     setFullExpression('');
     setJustEvaluated(true);
@@ -210,11 +254,11 @@ const Calculator: React.FC = () => {
   }, [currentInput]);
 
   const handleDiscount = useCallback((rate: number) => {
-    const num = parseFloat(currentInput);
+    const num = parseFloat(currentInput || '0');
     if (isNaN(num)) return;
     const total = num - (num * rate / 100);
     const expr = `${num} - ${rate}% Discount`;
-    setHistory(prev => [{ expression: expr, result: total.toFixed(2) }, ...prev]);
+    setHistory(prev => [{ expression: expr, result: total.toFixed(2), timestamp: Date.now() }, ...prev]);
     setCurrentInput(total.toFixed(2));
     setFullExpression('');
     setJustEvaluated(true);
@@ -227,8 +271,8 @@ const Calculator: React.FC = () => {
   }, []);
 
   const formatDisplay = (val: string) => {
+    if (!val) return '';
     if (val === 'Error') return val;
-    if (val === '0') return '0';
     if (val.endsWith('.')) return val;
     const num = parseFloat(val);
     if (isNaN(num)) return val;
@@ -236,6 +280,8 @@ const Calculator: React.FC = () => {
     const formatted = parseInt(parts[0], 10).toLocaleString('en-IN');
     return parts.length > 1 ? formatted + '.' + parts[1] : formatted;
   };
+
+  const isEmpty = !currentInput && !fullExpression;
 
   return (
     <div className="flex flex-col h-screen max-w-md mx-auto bg-calc-display relative select-none">
@@ -290,13 +336,30 @@ const Calculator: React.FC = () => {
       {/* Display */}
       <div className="flex-1 flex flex-col justify-end px-6 pb-2">
         {fullExpression && (
-          <div className="text-right text-muted-foreground text-lg truncate">
-            {fullExpression}
+          <div className="text-right text-foreground text-4xl font-normal tracking-tight truncate leading-tight">
+            {fullExpression}{!waitingForOperand && formatDisplay(currentInput)}
           </div>
         )}
-        <div className="text-right text-foreground text-5xl font-light tracking-tight truncate leading-tight pb-2">
-          {formatDisplay(currentInput)}
-        </div>
+        {/* Result preview when typing formula */}
+        {fullExpression && !justEvaluated && (
+          <div className="text-right text-muted-foreground text-2xl truncate mt-1">
+            {(() => {
+              const inputVal = currentInput || '0';
+              const preview = safeEvaluate(fullExpression + inputVal);
+              return preview !== 'Error' ? formatDisplay(preview) : '';
+            })()}
+          </div>
+        )}
+        {/* Main display when no expression */}
+        {!fullExpression && (
+          <div className="text-right text-foreground text-6xl font-light tracking-tight truncate leading-tight pb-2">
+            {isEmpty ? (
+              <span className="inline-block w-[3px] h-16 bg-primary animate-blink align-middle" />
+            ) : (
+              formatDisplay(currentInput)
+            )}
+          </div>
+        )}
       </div>
 
       {/* Scientific Toggle */}
@@ -320,31 +383,26 @@ const Calculator: React.FC = () => {
 
       {/* Button Grid */}
       <div className="grid grid-cols-4 gap-2 p-3 pb-6">
-        {/* Row 1 */}
         <CalcButton label="AC" type="primary" onClick={handleClear} />
         <CalcButton label="( )" type="function" onClick={handleParenthesis} />
         <CalcButton label="%" type="function" onClick={handlePercent} />
         <CalcButton label="÷" type="operator" onClick={() => handleOperator('/')} />
 
-        {/* Row 2 */}
         <CalcButton label="7" type="number" onClick={() => handleNumber('7')} />
         <CalcButton label="8" type="number" onClick={() => handleNumber('8')} />
         <CalcButton label="9" type="number" onClick={() => handleNumber('9')} />
         <CalcButton label="×" type="operator" onClick={() => handleOperator('*')} />
 
-        {/* Row 3 */}
         <CalcButton label="4" type="number" onClick={() => handleNumber('4')} />
         <CalcButton label="5" type="number" onClick={() => handleNumber('5')} />
         <CalcButton label="6" type="number" onClick={() => handleNumber('6')} />
         <CalcButton label="−" type="operator" onClick={() => handleOperator('-')} />
 
-        {/* Row 4 */}
         <CalcButton label="1" type="number" onClick={() => handleNumber('1')} />
         <CalcButton label="2" type="number" onClick={() => handleNumber('2')} />
         <CalcButton label="3" type="number" onClick={() => handleNumber('3')} />
         <CalcButton label="+" type="operator" onClick={() => handleOperator('+')} />
 
-        {/* Row 5 */}
         <CalcButton label="0" type="number" onClick={() => handleNumber('0')} />
         <CalcButton label="." type="number" onClick={() => handleNumber('.')} />
         <CalcButton
@@ -373,10 +431,12 @@ interface CalcButtonProps {
   label: string;
   type: 'number' | 'operator' | 'function' | 'primary' | 'equals';
   onClick: () => void;
+  onClick2?: () => void;
   icon?: React.ReactNode;
+  isNegative?: boolean;
 }
 
-const CalcButton: React.FC<CalcButtonProps> = ({ label, type, onClick, icon }) => {
+const CalcButton: React.FC<CalcButtonProps> = ({ label, type, onClick, onClick2, icon }) => {
   const baseClasses = "rounded-full flex items-center justify-center font-normal active:scale-95 transition-all duration-100 aspect-square text-3xl";
   
   const typeClasses = {
@@ -390,7 +450,7 @@ const CalcButton: React.FC<CalcButtonProps> = ({ label, type, onClick, icon }) =
   return (
     <button
       className={`${baseClasses} ${typeClasses[type]}`}
-      onClick={onClick}
+      onClick={onClick2 || onClick}
     >
       {icon || label}
     </button>
