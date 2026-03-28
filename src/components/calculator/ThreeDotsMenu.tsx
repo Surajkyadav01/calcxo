@@ -34,12 +34,12 @@ const ThreeDotsMenu: React.FC<ThreeDotsMenuProps> = ({
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 bg-popover rounded-xl shadow-xl z-30 py-2 min-w-[200px] animate-fade-in"
+      className="absolute right-0 top-full mt-1 bg-muted rounded-2xl shadow-xl z-30 py-3 min-w-[220px] animate-fade-in"
     >
       {items.map((item, i) => (
         <button
           key={i}
-          className="w-full flex items-center gap-3 px-4 py-3 text-popover-foreground hover:bg-muted transition-colors text-sm"
+          className="w-full flex items-center gap-3 px-5 py-3.5 text-foreground hover:bg-border transition-colors text-base"
           onClick={item.action}
         >
           {item.icon}

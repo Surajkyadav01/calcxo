@@ -120,8 +120,18 @@ const Calculator: React.FC = () => {
   }, []);
 
   const handleBackspace = useCallback(() => {
-    if (justEvaluated || waitingForOperand) {
-      return; // Don't backspace on result or when waiting
+    if (justEvaluated) {
+      // After result, allow deleting digits from result
+      if (currentInput.length > 1) {
+        setCurrentInput(prev => prev.slice(0, -1));
+      } else {
+        setCurrentInput('0');
+      }
+      setJustEvaluated(false);
+      return;
+    }
+    if (waitingForOperand) {
+      return;
     }
     if (currentInput.length > 1) {
       setCurrentInput(prev => prev.slice(0, -1));
@@ -367,7 +377,7 @@ interface CalcButtonProps {
 }
 
 const CalcButton: React.FC<CalcButtonProps> = ({ label, type, onClick, icon }) => {
-  const baseClasses = "rounded-full flex items-center justify-center font-normal active:scale-95 transition-all duration-100 aspect-square text-2xl";
+  const baseClasses = "rounded-full flex items-center justify-center font-normal active:scale-95 transition-all duration-100 aspect-square text-3xl";
   
   const typeClasses = {
     number: "bg-calc-number text-calc-number-foreground",
