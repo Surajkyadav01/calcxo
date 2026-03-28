@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { History, MoreVertical, ChevronUp, ChevronDown, Delete } from 'lucide-react';
 import HistoryPanel from '@/components/calculator/HistoryPanel';
 import ScientificPanel from '@/components/calculator/ScientificPanel';
@@ -12,6 +12,10 @@ export interface HistoryEntry {
   timestamp: number;
 }
 
+const HISTORY_STORAGE_KEY = 'calculator-history';
+const OPERATOR_PATTERN = /[+−×÷^]$/;
+const TRAILING_NUMBER_PATTERN = /(\d*\.?\d+)\s*$/;
+
 const Calculator: React.FC = () => {
   const [currentInput, setCurrentInput] = useState('');
   const [fullExpression, setFullExpression] = useState('');
@@ -24,10 +28,41 @@ const Calculator: React.FC = () => {
   const [isDark, setIsDark] = useState(false);
   const [justEvaluated, setJustEvaluated] = useState(false);
   const [waitingForOperand, setWaitingForOperand] = useState(false);
+  const touchStartY = useRef<number | null>(null);
+  const touchStartX = useRef<number | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
   }, [isDark]);
+
+  useEffect(() => {
+    try {
+      const savedHistory = window.localStorage.getItem(HISTORY_STORAGE_KEY);
+      if (!savedHistory) return;
+
+      const parsedHistory = JSON.parse(savedHistory);
+      if (Array.isArray(parsedHistory)) {
+        setHistory(
+          parsedHistory.filter(
+            (entry): entry is HistoryEntry =>
+              typeof entry?.expression === 'string' &&
+              typeof entry?.result === 'string' &&
+              typeof entry?.timestamp === 'number'
+          )
+        );
+      }
+    } catch {
+      window.localStorage.removeItem(HISTORY_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
+    } catch {
+      // Ignore storage failures
+    }
+  }, [history]);
 
   const handleNumber = useCallback((num: string) => {
     if (justEvaluated) {
@@ -121,76 +156,93 @@ const Calculator: React.FC = () => {
   }, []);
 
   const handleBackspace = useCallback(() => {
-    if (justEvaluated) {
-      // Delete from result
-      if (currentInput.length > 1) {
-        setCurrentInput(prev => prev.slice(0, -1));
-      } else {
-        setCurrentInput('');
-      }
+    if (currentInput.length > 0) {
+      setCurrentInput(prev => prev.slice(0, -1));
+      setJustEvaluated(false);
+      setWaitingForOperand(false);
+      return;
+    }
+
+    const trimmedExpression = fullExpression.trimEnd();
+    if (!trimmedExpression) {
       setJustEvaluated(false);
       return;
     }
 
-    if (waitingForOperand) {
-      // Remove last operator from fullExpression
-      const trimmed = fullExpression.trimEnd();
-      if (trimmed.length > 0) {
-        // Remove the last operator and space
-        const newExpr = trimmed.replace(/\s*[+−×÷^]\s*$/, '');
-        if (newExpr === '') {
-          // Nothing left in expression, restore the number
-          setFullExpression('');
-          setWaitingForOperand(false);
-          // The number before operator is in the expression, extract it
-          const parts = trimmed.split(/\s+/);
-          if (parts.length >= 1) {
-            setCurrentInput(parts[parts.length - 2] || parts[0] || '');
-          }
-        } else {
-          // There's still expression left, extract last number
-          const parts = newExpr.split(/\s+/);
-          const lastNum = parts.pop() || '';
-          const remainingExpr = parts.join(' ');
-          setFullExpression(remainingExpr ? remainingExpr + ' ' : '');
-          setCurrentInput(lastNum);
-          setWaitingForOperand(false);
-        }
+    const lastChar = trimmedExpression.slice(-1);
+
+    if (OPERATOR_PATTERN.test(lastChar)) {
+      const expressionWithoutOperator = trimmedExpression.slice(0, -1).trimEnd();
+      const trailingNumber = expressionWithoutOperator.match(TRAILING_NUMBER_PATTERN)?.[1];
+
+      if (trailingNumber) {
+        const expressionWithoutNumber = expressionWithoutOperator
+          .slice(0, -trailingNumber.length)
+          .trimEnd();
+        setFullExpression(expressionWithoutNumber ? `${expressionWithoutNumber} ` : '');
+        setCurrentInput(trailingNumber);
+      } else {
+        setFullExpression(expressionWithoutOperator);
       }
+
+      setJustEvaluated(false);
+      setWaitingForOperand(false);
       return;
     }
 
-    // Normal: delete from currentInput
-    if (currentInput.length > 1) {
-      setCurrentInput(prev => prev.slice(0, -1));
-    } else if (currentInput.length === 1) {
-      setCurrentInput('');
-      // If there's expression, try to go back
-      if (fullExpression.trim()) {
-        const trimmed = fullExpression.trimEnd();
-        const parts = trimmed.split(/\s+/);
-        if (parts.length >= 2) {
-          // Remove last operator and get the number before it
-          parts.pop(); // remove operator
-          const lastNum = parts.pop() || '';
-          setFullExpression(parts.length > 0 ? parts.join(' ') + ' ' : '');
-          setCurrentInput(lastNum);
-          setWaitingForOperand(false);
-        } else if (parts.length === 1) {
-          setCurrentInput(parts[0]);
-          setFullExpression('');
-        }
-      }
+    if (lastChar === '(' || lastChar === ')') {
+      const nextExpression = trimmedExpression.slice(0, -1).trimEnd();
+      setFullExpression(nextExpression ? `${nextExpression}${OPERATOR_PATTERN.test(nextExpression.slice(-1)) ? ' ' : ''}` : '');
+      setJustEvaluated(false);
+      setWaitingForOperand(Boolean(nextExpression && (OPERATOR_PATTERN.test(nextExpression.slice(-1)) || nextExpression.endsWith('('))));
+      return;
     }
-  }, [currentInput, fullExpression, justEvaluated, waitingForOperand]);
+
+    const shortenedExpression = trimmedExpression.slice(0, -1).trimEnd();
+    const trailingNumber = shortenedExpression.match(TRAILING_NUMBER_PATTERN)?.[1];
+
+    if (trailingNumber) {
+      const expressionWithoutNumber = shortenedExpression
+        .slice(0, -trailingNumber.length)
+        .trimEnd();
+      setFullExpression(expressionWithoutNumber ? `${expressionWithoutNumber} ` : '');
+      setCurrentInput(trailingNumber);
+      setWaitingForOperand(false);
+    } else {
+      setFullExpression(shortenedExpression);
+      setWaitingForOperand(Boolean(shortenedExpression && (OPERATOR_PATTERN.test(shortenedExpression.slice(-1)) || shortenedExpression.endsWith('('))));
+    }
+
+    setJustEvaluated(false);
+  }, [currentInput, fullExpression]);
 
   const handlePercent = useCallback(() => {
-    const num = parseFloat(currentInput || '0');
-    if (!isNaN(num)) {
-      setCurrentInput((num / 100).toString());
-      setJustEvaluated(false);
+    if (!currentInput) return;
+
+    const currentValue = parseFloat(currentInput);
+    if (Number.isNaN(currentValue)) return;
+
+    const trimmedExpression = fullExpression.trim();
+    let percentValue = currentValue / 100;
+
+    if (trimmedExpression) {
+      const operatorMatch = trimmedExpression.match(/([+−×÷^])\s*$/);
+      const baseExpression = trimmedExpression.replace(/([+−×÷^])\s*$/, '').trim();
+
+      if (operatorMatch && baseExpression) {
+        const baseValue = parseFloat(safeEvaluate(baseExpression));
+        if (Number.isFinite(baseValue)) {
+          percentValue = ['+', '−'].includes(operatorMatch[1])
+            ? (baseValue * currentValue) / 100
+            : currentValue / 100;
+        }
+      }
     }
-  }, [currentInput]);
+
+    setCurrentInput(parseFloat(percentValue.toFixed(10)).toString());
+    setJustEvaluated(false);
+    setWaitingForOperand(false);
+  }, [currentInput, fullExpression, safeEvaluate]);
 
   const handleParenthesis = useCallback(() => {
     if (justEvaluated) {
@@ -204,9 +256,22 @@ const Calculator: React.FC = () => {
     const combined = fullExpression + currentInput;
     const openCount = (combined.match(/\(/g) || []).length;
     const closeCount = (combined.match(/\)/g) || []).length;
+    const trimmedExpression = fullExpression.trimEnd();
+    const lastExpressionChar = trimmedExpression.slice(-1);
 
-    if (waitingForOperand || !currentInput) {
-      setFullExpression(prev => prev + '(');
+    if (!currentInput) {
+      if (openCount > closeCount && lastExpressionChar && !OPERATOR_PATTERN.test(lastExpressionChar) && lastExpressionChar !== '(') {
+        setFullExpression(`${trimmedExpression})`);
+        setWaitingForOperand(false);
+        return;
+      }
+
+      const nextExpression = trimmedExpression && /[\d)]$/.test(lastExpressionChar)
+        ? `${trimmedExpression} × (`
+        : `${fullExpression}(`;
+
+      setFullExpression(nextExpression);
+      setWaitingForOperand(true);
     } else if (openCount > closeCount) {
       setCurrentInput(prev => prev + ')');
     } else {
@@ -270,6 +335,31 @@ const Calculator: React.FC = () => {
     setShowMenu(false);
   }, []);
 
+  const handleTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    touchStartY.current = touch.clientY;
+    touchStartX.current = touch.clientX;
+  }, []);
+
+  const handleTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    if (showHistory || touchStartY.current === null || touchStartX.current === null) return;
+
+    const touch = event.touches[0];
+    const deltaY = touch.clientY - touchStartY.current;
+    const deltaX = Math.abs(touch.clientX - touchStartX.current);
+
+    if (touchStartY.current < 180 && deltaY > 90 && deltaX < 60) {
+      setShowHistory(true);
+      touchStartY.current = null;
+      touchStartX.current = null;
+    }
+  }, [showHistory]);
+
+  const handleTouchEnd = useCallback(() => {
+    touchStartY.current = null;
+    touchStartX.current = null;
+  }, []);
+
   const formatDisplay = (val: string) => {
     if (!val) return '';
     if (val === 'Error') return val;
@@ -284,7 +374,12 @@ const Calculator: React.FC = () => {
   const isEmpty = !currentInput && !fullExpression;
 
   return (
-    <div className="flex flex-col h-screen max-w-md mx-auto bg-calc-display relative select-none">
+    <div
+      className="flex flex-col h-screen max-w-md mx-auto bg-calc-display relative select-none"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
       {/* Top Bar */}
       <div className="flex justify-between items-center px-4 pt-4 pb-2">
         <button
@@ -336,7 +431,7 @@ const Calculator: React.FC = () => {
       {/* Display */}
       <div className="flex-1 flex flex-col justify-end px-6 pb-2">
         {fullExpression && (
-          <div className="text-right text-foreground text-4xl font-normal tracking-tight truncate leading-tight">
+          <div className="text-right text-foreground text-4xl font-semibold tracking-tight truncate leading-tight">
             {fullExpression}{!waitingForOperand && formatDisplay(currentInput)}
           </div>
         )}
@@ -352,7 +447,7 @@ const Calculator: React.FC = () => {
         )}
         {/* Main display when no expression */}
         {!fullExpression && (
-          <div className="text-right text-foreground text-6xl font-light tracking-tight truncate leading-tight pb-2">
+          <div className="text-right text-foreground text-7xl font-bold tracking-tight truncate leading-tight pb-2">
             {isEmpty ? (
               <span className="inline-block w-[3px] h-16 bg-primary animate-blink align-middle" />
             ) : (
@@ -437,7 +532,7 @@ interface CalcButtonProps {
 }
 
 const CalcButton: React.FC<CalcButtonProps> = ({ label, type, onClick, onClick2, icon }) => {
-  const baseClasses = "rounded-full flex items-center justify-center font-normal active:scale-95 transition-all duration-100 aspect-square text-3xl";
+  const baseClasses = "rounded-full flex items-center justify-center font-semibold active:scale-95 transition-all duration-100 aspect-square text-3xl";
   
   const typeClasses = {
     number: "bg-calc-number text-calc-number-foreground",
