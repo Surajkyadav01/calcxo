@@ -396,7 +396,7 @@ const Calculator: React.FC = () => {
         <CalcButton label="4" type="number" onClick={() => handleNumber('4')} />
         <CalcButton label="5" type="number" onClick={() => handleNumber('5')} />
         <CalcButton label="6" type="number" onClick={() => handleNumber('6')} />
-        <CalcButton label="−" type="operator" onClick={() => handleNumber('-')} isNegative onClick2={() => handleOperator('-')} />
+        <CalcButton label="−" type="operator" onClick={() => handleOperator('-')} />
 
         <CalcButton label="1" type="number" onClick={() => handleNumber('1')} />
         <CalcButton label="2" type="number" onClick={() => handleNumber('2')} />
