@@ -17,7 +17,7 @@ Calcxo is built as a personal project to enhance web development skills and crea
 
 ## 🌐 Live Demo
 
-👉 https://vercel.com/surajkyadav01s-projects/calcxo
+👉 https://calcxo.vercel.app/
 
 ## 🛠️ Tech Stack
 
