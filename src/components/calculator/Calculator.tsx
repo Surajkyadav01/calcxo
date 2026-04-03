@@ -267,27 +267,36 @@ const Calculator: React.FC = () => {
     const trimmedExpression = fullExpression.trimEnd();
     const lastExpressionChar = trimmedExpression.slice(-1);
 
-    if (!currentInput) {
+    if (currentInput) {
+      // User has typed a number
+      if (openCount > closeCount) {
+        // Close the bracket: add currentInput then ) to expression
+        setFullExpression(prev => prev + currentInput + ')');
+        setCurrentInput('');
+        setWaitingForOperand(false);
+      } else {
+        // Open bracket with implicit multiply: 5 × (
+        setFullExpression(prev => prev + currentInput + ' × (');
+        setCurrentInput('');
+        setWaitingForOperand(true);
+      }
+    } else {
+      // No current input
       if (openCount > closeCount && lastExpressionChar && !OPERATOR_PATTERN.test(lastExpressionChar) && lastExpressionChar !== '(') {
+        // Close bracket
         setFullExpression(`${trimmedExpression})`);
         setWaitingForOperand(false);
-        return;
+      } else {
+        // Open bracket
+        const needsMultiply = trimmedExpression && /[\d)]$/.test(lastExpressionChar);
+        const nextExpression = needsMultiply
+          ? `${trimmedExpression} × (`
+          : `${fullExpression}(`;
+        setFullExpression(nextExpression);
+        setWaitingForOperand(true);
       }
-
-      const nextExpression = trimmedExpression && /[\d)]$/.test(lastExpressionChar)
-        ? `${trimmedExpression} × (`
-        : `${fullExpression}(`;
-
-      setFullExpression(nextExpression);
-      setWaitingForOperand(true);
-    } else if (openCount > closeCount) {
-      setCurrentInput(prev => prev + ')');
-    } else {
-      setFullExpression(prev => prev + currentInput + ' × (');
-      setCurrentInput('');
-      setWaitingForOperand(true);
     }
-  }, [currentInput, fullExpression, justEvaluated, waitingForOperand]);
+  }, [currentInput, fullExpression, justEvaluated]);
 
   const handleScientific = useCallback((func: string) => {
     const num = parseFloat(currentInput || '0');
