@@ -123,6 +123,19 @@ const Calculator: React.FC = () => {
         .replace(/÷/g, '/')
         .replace(/−/g, '-')
         .replace(/\^/g, '**');
+
+      // Handle percentage: "200 + 10%" → "200 + (200*10/100)", "50%" alone → "50/100"
+      // For + and -, percentage is relative to base value
+      evalExpr = evalExpr.replace(/(\d+\.?\d*)\s*([+\-])\s*(\d+\.?\d*)%/g, (_, base, op, pct) => {
+        return `${base} ${op} (${base} * ${pct} / 100)`;
+      });
+      // For * and /, percentage is just /100
+      evalExpr = evalExpr.replace(/(\d+\.?\d*)\s*([*/])\s*(\d+\.?\d*)%/g, (_, base, op, pct) => {
+        return `${base} ${op} (${pct} / 100)`;
+      });
+      // Standalone percentage (no operator before it): just divide by 100
+      evalExpr = evalExpr.replace(/(\d+\.?\d*)%/g, '($1/100)');
+
       evalExpr = evalExpr.replace(/[\s+\-*/]+$/, '').trim();
       if (!evalExpr) return '0';
       const result = new Function('return (' + evalExpr + ')')();
