@@ -123,6 +123,19 @@ const Calculator: React.FC = () => {
         .replace(/÷/g, '/')
         .replace(/−/g, '-')
         .replace(/\^/g, '**');
+
+      // Handle percentage: "200 + 10%" → "200 + (200*10/100)", "50%" alone → "50/100"
+      // For + and -, percentage is relative to base value
+      evalExpr = evalExpr.replace(/(\d+\.?\d*)\s*([+\-])\s*(\d+\.?\d*)%/g, (_, base, op, pct) => {
+        return `${base} ${op} (${base} * ${pct} / 100)`;
+      });
+      // For * and /, percentage is just /100
+      evalExpr = evalExpr.replace(/(\d+\.?\d*)\s*([*/])\s*(\d+\.?\d*)%/g, (_, base, op, pct) => {
+        return `${base} ${op} (${pct} / 100)`;
+      });
+      // Standalone percentage (no operator before it): just divide by 100
+      evalExpr = evalExpr.replace(/(\d+\.?\d*)%/g, '($1/100)');
+
       evalExpr = evalExpr.replace(/[\s+\-*/]+$/, '').trim();
       if (!evalExpr) return '0';
       const result = new Function('return (' + evalExpr + ')')();
@@ -136,9 +149,15 @@ const Calculator: React.FC = () => {
   }, []);
 
   const handleEquals = useCallback(() => {
-    const inputVal = currentInput || '0';
-    const fullExpr = fullExpression + inputVal;
-    if (!fullExpression.trim()) return;
+    const trimmedExpr = fullExpression.trim();
+    if (!trimmedExpr && !currentInput) return;
+    
+    // If expression ends with %, don't append currentInput
+    const fullExpr = trimmedExpr.endsWith('%') && !currentInput
+      ? trimmedExpr
+      : fullExpression + (currentInput || '0');
+    
+    if (!fullExpr.trim()) return;
 
     const result = safeEvaluate(fullExpr);
     setHistory(prev => [{ expression: fullExpr, result, timestamp: Date.now() }, ...prev]);
@@ -217,40 +236,15 @@ const Calculator: React.FC = () => {
   }, [currentInput, fullExpression]);
 
   const handlePercent = useCallback(() => {
-    // If just evaluated, use the result as currentInput
-    const inputToUse = currentInput || '0';
-    const currentValue = parseFloat(inputToUse);
-    if (Number.isNaN(currentValue)) return;
-
-    const trimmedExpression = fullExpression.trim();
-    let percentValue: number;
-
-    if (trimmedExpression) {
-      // There's an expression like "200 + " and user typed "10" then "%"
-      const operatorMatch = trimmedExpression.match(/([+−×÷^])\s*$/);
-      const baseExpression = trimmedExpression.replace(/([+−×÷^])\s*$/, '').trim();
-
-      if (operatorMatch && baseExpression) {
-        const baseValue = parseFloat(safeEvaluate(baseExpression));
-        if (Number.isFinite(baseValue) && ['+', '−'].includes(operatorMatch[1])) {
-          // For + and -, percentage is relative to base: 200 + 10% = 200 + 20
-          percentValue = (baseValue * currentValue) / 100;
-        } else {
-          // For × and ÷, just divide by 100
-          percentValue = currentValue / 100;
-        }
-      } else {
-        percentValue = currentValue / 100;
-      }
-    } else {
-      // No expression, just convert number to percentage: 50% = 0.5
-      percentValue = currentValue / 100;
-    }
-
-    setCurrentInput(parseFloat(percentValue.toFixed(10)).toString());
-    setJustEvaluated(false);
+    if (!currentInput || currentInput === '0') return;
+    
+    // Add % to the expression - calculation will happen on equals
+    const inputWithPercent = currentInput + '%';
+    setFullExpression(prev => prev + inputWithPercent);
+    setCurrentInput('');
     setWaitingForOperand(false);
-  }, [currentInput, fullExpression, safeEvaluate]);
+    setJustEvaluated(false);
+  }, [currentInput]);
 
   const handleParenthesis = useCallback(() => {
     if (justEvaluated) {
