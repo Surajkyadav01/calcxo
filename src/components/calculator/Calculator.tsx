@@ -217,26 +217,34 @@ const Calculator: React.FC = () => {
   }, [currentInput, fullExpression]);
 
   const handlePercent = useCallback(() => {
-    if (!currentInput) return;
-
-    const currentValue = parseFloat(currentInput);
+    // If just evaluated, use the result as currentInput
+    const inputToUse = currentInput || '0';
+    const currentValue = parseFloat(inputToUse);
     if (Number.isNaN(currentValue)) return;
 
     const trimmedExpression = fullExpression.trim();
-    let percentValue = currentValue / 100;
+    let percentValue: number;
 
     if (trimmedExpression) {
+      // There's an expression like "200 + " and user typed "10" then "%"
       const operatorMatch = trimmedExpression.match(/([+−×÷^])\s*$/);
       const baseExpression = trimmedExpression.replace(/([+−×÷^])\s*$/, '').trim();
 
       if (operatorMatch && baseExpression) {
         const baseValue = parseFloat(safeEvaluate(baseExpression));
-        if (Number.isFinite(baseValue)) {
-          percentValue = ['+', '−'].includes(operatorMatch[1])
-            ? (baseValue * currentValue) / 100
-            : currentValue / 100;
+        if (Number.isFinite(baseValue) && ['+', '−'].includes(operatorMatch[1])) {
+          // For + and -, percentage is relative to base: 200 + 10% = 200 + 20
+          percentValue = (baseValue * currentValue) / 100;
+        } else {
+          // For × and ÷, just divide by 100
+          percentValue = currentValue / 100;
         }
+      } else {
+        percentValue = currentValue / 100;
       }
+    } else {
+      // No expression, just convert number to percentage: 50% = 0.5
+      percentValue = currentValue / 100;
     }
 
     setCurrentInput(parseFloat(percentValue.toFixed(10)).toString());
@@ -259,27 +267,36 @@ const Calculator: React.FC = () => {
     const trimmedExpression = fullExpression.trimEnd();
     const lastExpressionChar = trimmedExpression.slice(-1);
 
-    if (!currentInput) {
+    if (currentInput) {
+      // User has typed a number
+      if (openCount > closeCount) {
+        // Close the bracket: add currentInput then ) to expression
+        setFullExpression(prev => prev + currentInput + ')');
+        setCurrentInput('');
+        setWaitingForOperand(false);
+      } else {
+        // Open bracket with implicit multiply: 5 × (
+        setFullExpression(prev => prev + currentInput + ' × (');
+        setCurrentInput('');
+        setWaitingForOperand(true);
+      }
+    } else {
+      // No current input
       if (openCount > closeCount && lastExpressionChar && !OPERATOR_PATTERN.test(lastExpressionChar) && lastExpressionChar !== '(') {
+        // Close bracket
         setFullExpression(`${trimmedExpression})`);
         setWaitingForOperand(false);
-        return;
+      } else {
+        // Open bracket
+        const needsMultiply = trimmedExpression && /[\d)]$/.test(lastExpressionChar);
+        const nextExpression = needsMultiply
+          ? `${trimmedExpression} × (`
+          : `${fullExpression}(`;
+        setFullExpression(nextExpression);
+        setWaitingForOperand(true);
       }
-
-      const nextExpression = trimmedExpression && /[\d)]$/.test(lastExpressionChar)
-        ? `${trimmedExpression} × (`
-        : `${fullExpression}(`;
-
-      setFullExpression(nextExpression);
-      setWaitingForOperand(true);
-    } else if (openCount > closeCount) {
-      setCurrentInput(prev => prev + ')');
-    } else {
-      setFullExpression(prev => prev + currentInput + ' × (');
-      setCurrentInput('');
-      setWaitingForOperand(true);
     }
-  }, [currentInput, fullExpression, justEvaluated, waitingForOperand]);
+  }, [currentInput, fullExpression, justEvaluated]);
 
   const handleScientific = useCallback((func: string) => {
     const num = parseFloat(currentInput || '0');
