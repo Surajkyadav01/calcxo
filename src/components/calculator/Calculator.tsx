@@ -217,26 +217,34 @@ const Calculator: React.FC = () => {
   }, [currentInput, fullExpression]);
 
   const handlePercent = useCallback(() => {
-    if (!currentInput) return;
-
-    const currentValue = parseFloat(currentInput);
+    // If just evaluated, use the result as currentInput
+    const inputToUse = currentInput || '0';
+    const currentValue = parseFloat(inputToUse);
     if (Number.isNaN(currentValue)) return;
 
     const trimmedExpression = fullExpression.trim();
-    let percentValue = currentValue / 100;
+    let percentValue: number;
 
     if (trimmedExpression) {
+      // There's an expression like "200 + " and user typed "10" then "%"
       const operatorMatch = trimmedExpression.match(/([+−×÷^])\s*$/);
       const baseExpression = trimmedExpression.replace(/([+−×÷^])\s*$/, '').trim();
 
       if (operatorMatch && baseExpression) {
         const baseValue = parseFloat(safeEvaluate(baseExpression));
-        if (Number.isFinite(baseValue)) {
-          percentValue = ['+', '−'].includes(operatorMatch[1])
-            ? (baseValue * currentValue) / 100
-            : currentValue / 100;
+        if (Number.isFinite(baseValue) && ['+', '−'].includes(operatorMatch[1])) {
+          // For + and -, percentage is relative to base: 200 + 10% = 200 + 20
+          percentValue = (baseValue * currentValue) / 100;
+        } else {
+          // For × and ÷, just divide by 100
+          percentValue = currentValue / 100;
         }
+      } else {
+        percentValue = currentValue / 100;
       }
+    } else {
+      // No expression, just convert number to percentage: 50% = 0.5
+      percentValue = currentValue / 100;
     }
 
     setCurrentInput(parseFloat(percentValue.toFixed(10)).toString());
