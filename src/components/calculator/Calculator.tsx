@@ -149,9 +149,15 @@ const Calculator: React.FC = () => {
   }, []);
 
   const handleEquals = useCallback(() => {
-    const inputVal = currentInput || '0';
-    const fullExpr = fullExpression + inputVal;
-    if (!fullExpression.trim()) return;
+    const trimmedExpr = fullExpression.trim();
+    if (!trimmedExpr && !currentInput) return;
+    
+    // If expression ends with %, don't append currentInput
+    const fullExpr = trimmedExpr.endsWith('%') && !currentInput
+      ? trimmedExpr
+      : fullExpression + (currentInput || '0');
+    
+    if (!fullExpr.trim()) return;
 
     const result = safeEvaluate(fullExpr);
     setHistory(prev => [{ expression: fullExpr, result, timestamp: Date.now() }, ...prev]);
