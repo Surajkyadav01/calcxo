@@ -12,9 +12,191 @@ export interface HistoryEntry {
   timestamp: number;
 }
 
+interface ParsedValue {
+  value: number;
+  isPercent: boolean;
+}
+
 const HISTORY_STORAGE_KEY = 'calculator-history';
 const OPERATOR_PATTERN = /[+−×÷^]$/;
 const TRAILING_NUMBER_PATTERN = /(\d*\.?\d+)\s*$/;
+const COMPLETED_VALUE_PATTERN = /[\d%)]$/;
+const TOKEN_PATTERN = /\d+(?:\.\d*)?|\.\d+|[()+\-*/^%]/g;
+
+const hasCompletedValue = (expression: string) => COMPLETED_VALUE_PATTERN.test(expression.trimEnd());
+
+const buildExpressionForEvaluation = (expression: string, input: string) => {
+  const trimmedExpression = expression.trimEnd();
+  if (input) {
+    return `${expression}${input}`;
+  }
+
+  return trimmedExpression;
+};
+
+const evaluateExpression = (expr: string): string => {
+  try {
+    const normalized = expr
+      .replace(/×/g, '*')
+      .replace(/÷/g, '/')
+      .replace(/−/g, '-')
+      .replace(/\s+/g, '')
+      .replace(/[+\-*/^]+$/, '');
+
+    if (!normalized) return '0';
+
+    const tokens = normalized.match(TOKEN_PATTERN);
+    if (!tokens || tokens.join('') !== normalized) return 'Error';
+
+    let position = 0;
+
+    const peek = () => tokens[position];
+    const consume = () => tokens[position++]!;
+    const toValue = ({ value, isPercent }: ParsedValue) => (isPercent ? value / 100 : value);
+    const markAsPercent = (item: ParsedValue): ParsedValue => ({
+      value: toValue(item),
+      isPercent: true,
+    });
+
+    const parseExpression = (): ParsedValue => parseAdditive();
+
+    const parseAdditive = (): ParsedValue => {
+      let left = parseMultiplicative();
+
+      while (peek() === '+' || peek() === '-') {
+        const operator = consume();
+        const baseValue = toValue(left);
+        const right = parseMultiplicative();
+
+        if (right.isPercent) {
+          const delta = baseValue * (right.value / 100);
+          left = {
+            value: operator === '+' ? baseValue + delta : baseValue - delta,
+            isPercent: false,
+          };
+        } else {
+          const rightValue = toValue(right);
+          left = {
+            value: operator === '+' ? baseValue + rightValue : baseValue - rightValue,
+            isPercent: false,
+          };
+        }
+      }
+
+      return left;
+    };
+
+    const parseMultiplicative = (): ParsedValue => {
+      let left = parsePower();
+
+      while (peek() === '*' || peek() === '/') {
+        const operator = consume();
+        const leftValue = toValue(left);
+        const rightValue = toValue(parsePower());
+
+        left = {
+          value: operator === '*' ? leftValue * rightValue : leftValue / rightValue,
+          isPercent: false,
+        };
+      }
+
+      return left;
+    };
+
+    const parsePower = (): ParsedValue => {
+      let left = parseUnary();
+
+      if (peek() === '^') {
+        consume();
+        left = {
+          value: toValue(left) ** toValue(parsePower()),
+          isPercent: false,
+        };
+      }
+
+      return left;
+    };
+
+    const parseUnary = (): ParsedValue => {
+      if (peek() === '+') {
+        consume();
+        return parseUnary();
+      }
+
+      if (peek() === '-') {
+        consume();
+        return {
+          value: -toValue(parseUnary()),
+          isPercent: false,
+        };
+      }
+
+      return parsePrimary();
+    };
+
+    const parsePrimary = (): ParsedValue => {
+      const token = peek();
+
+      if (!token) {
+        throw new Error('Unexpected end of expression');
+      }
+
+      if (token === '(') {
+        consume();
+        const innerValue = parseExpression();
+
+        if (peek() !== ')') {
+          throw new Error('Missing closing parenthesis');
+        }
+
+        consume();
+
+        let result: ParsedValue = {
+          value: toValue(innerValue),
+          isPercent: false,
+        };
+
+        while (peek() === '%') {
+          consume();
+          result = markAsPercent(result);
+        }
+
+        return result;
+      }
+
+      const numericValue = Number(token);
+      if (Number.isNaN(numericValue)) {
+        throw new Error('Invalid token');
+      }
+
+      consume();
+
+      let result: ParsedValue = {
+        value: numericValue,
+        isPercent: false,
+      };
+
+      while (peek() === '%') {
+        consume();
+        result = markAsPercent(result);
+      }
+
+      return result;
+    };
+
+    const parsed = parseExpression();
+    if (position !== tokens.length) return 'Error';
+
+    const result = toValue(parsed);
+    if (typeof result === 'number' && isFinite(result)) {
+      return parseFloat(result.toFixed(10)).toString();
+    }
+
+    return 'Error';
+  } catch {
+    return 'Error';
+  }
+};
 
 const Calculator: React.FC = () => {
   const [currentInput, setCurrentInput] = useState('');
@@ -65,11 +247,20 @@ const Calculator: React.FC = () => {
   }, [history]);
 
   const handleNumber = useCallback((num: string) => {
+    const trimmedExpression = fullExpression.trimEnd();
+
     if (justEvaluated) {
       setCurrentInput(num === '.' ? '0.' : num);
       setFullExpression('');
       setJustEvaluated(false);
       setWaitingForOperand(false);
+      return;
+    }
+
+    if (!currentInput && !waitingForOperand && trimmedExpression.endsWith('%')) {
+      setCurrentInput(num === '.' ? '0.' : num);
+      setFullExpression('');
+      setJustEvaluated(false);
       return;
     }
 
@@ -86,10 +277,11 @@ const Calculator: React.FC = () => {
     } else {
       setCurrentInput(prev => prev + num);
     }
-  }, [currentInput, justEvaluated, waitingForOperand]);
+  }, [currentInput, fullExpression, justEvaluated, waitingForOperand]);
 
   const handleOperator = useCallback((op: string) => {
     const opSymbol = op === '*' ? '×' : op === '/' ? '÷' : op === '-' ? '−' : op;
+    const trimmedExpression = fullExpression.trimEnd();
 
     if (justEvaluated) {
       setFullExpression(currentInput + ' ' + opSymbol + ' ');
@@ -103,8 +295,20 @@ const Calculator: React.FC = () => {
       return;
     }
 
-    const inputVal = currentInput || '0';
-    setFullExpression(prev => prev + inputVal + ' ' + opSymbol + ' ');
+    if (currentInput) {
+      setFullExpression(prev => prev + currentInput + ' ' + opSymbol + ' ');
+      setCurrentInput('');
+      setWaitingForOperand(true);
+      return;
+    }
+
+    if (hasCompletedValue(trimmedExpression)) {
+      setFullExpression(`${trimmedExpression} ${opSymbol} `);
+      setWaitingForOperand(true);
+      return;
+    }
+
+    setFullExpression(`0 ${opSymbol} `);
     setWaitingForOperand(true);
   }, [currentInput, justEvaluated, waitingForOperand]);
 
@@ -116,47 +320,10 @@ const Calculator: React.FC = () => {
     return r;
   };
 
-  const safeEvaluate = useCallback((expr: string): string => {
-    try {
-      let evalExpr = expr
-        .replace(/×/g, '*')
-        .replace(/÷/g, '/')
-        .replace(/−/g, '-')
-        .replace(/\^/g, '**');
-
-      // Handle percentage: "200 + 10%" → "200 + (200*10/100)", "50%" alone → "50/100"
-      // For + and -, percentage is relative to base value
-      evalExpr = evalExpr.replace(/(\d+\.?\d*)\s*([+\-])\s*(\d+\.?\d*)%/g, (_, base, op, pct) => {
-        return `${base} ${op} (${base} * ${pct} / 100)`;
-      });
-      // For * and /, percentage is just /100
-      evalExpr = evalExpr.replace(/(\d+\.?\d*)\s*([*/])\s*(\d+\.?\d*)%/g, (_, base, op, pct) => {
-        return `${base} ${op} (${pct} / 100)`;
-      });
-      // Standalone percentage (no operator before it): just divide by 100
-      evalExpr = evalExpr.replace(/(\d+\.?\d*)%/g, '($1/100)');
-
-      evalExpr = evalExpr.replace(/[\s+\-*/]+$/, '').trim();
-      if (!evalExpr) return '0';
-      const result = new Function('return (' + evalExpr + ')')();
-      if (typeof result === 'number' && isFinite(result)) {
-        return parseFloat(result.toFixed(10)).toString();
-      }
-      return 'Error';
-    } catch {
-      return 'Error';
-    }
-  }, []);
+  const safeEvaluate = useCallback((expr: string): string => evaluateExpression(expr), []);
 
   const handleEquals = useCallback(() => {
-    const trimmedExpr = fullExpression.trim();
-    if (!trimmedExpr && !currentInput) return;
-    
-    // If expression ends with %, don't append currentInput
-    const fullExpr = trimmedExpr.endsWith('%') && !currentInput
-      ? trimmedExpr
-      : fullExpression + (currentInput || '0');
-    
+    const fullExpr = buildExpressionForEvaluation(fullExpression, currentInput);
     if (!fullExpr.trim()) return;
 
     const result = safeEvaluate(fullExpr);
@@ -236,15 +403,23 @@ const Calculator: React.FC = () => {
   }, [currentInput, fullExpression]);
 
   const handlePercent = useCallback(() => {
-    if (!currentInput || currentInput === '0') return;
-    
-    // Add % to the expression - calculation will happen on equals
-    const inputWithPercent = currentInput + '%';
-    setFullExpression(prev => prev + inputWithPercent);
-    setCurrentInput('');
+    if (currentInput && currentInput !== '0') {
+      setFullExpression(prev => prev + currentInput + '%');
+      setCurrentInput('');
+      setWaitingForOperand(false);
+      setJustEvaluated(false);
+      return;
+    }
+
+    const trimmedExpression = fullExpression.trimEnd();
+    if (!trimmedExpression || trimmedExpression.endsWith('%') || OPERATOR_PATTERN.test(trimmedExpression.slice(-1)) || trimmedExpression.endsWith('(')) {
+      return;
+    }
+
+    setFullExpression(`${trimmedExpression}%`);
     setWaitingForOperand(false);
     setJustEvaluated(false);
-  }, [currentInput]);
+  }, [currentInput, fullExpression]);
 
   const handleParenthesis = useCallback(() => {
     if (justEvaluated) {
@@ -450,8 +625,7 @@ const Calculator: React.FC = () => {
         {fullExpression && !justEvaluated && (
           <div className="text-right text-muted-foreground text-2xl truncate mt-1">
             {(() => {
-              const inputVal = currentInput || '0';
-              const preview = safeEvaluate(fullExpression + inputVal);
+              const preview = safeEvaluate(buildExpressionForEvaluation(fullExpression, currentInput));
               return preview !== 'Error' ? formatDisplay(preview) : '';
             })()}
           </div>
